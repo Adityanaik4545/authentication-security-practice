@@ -1,6 +1,7 @@
 import express from "express";
 import bodyParser from "body-parser";
 import pg from "pg";
+import bycrpt from "bcrypt";
 
 const db = new pg.Client({
   user: "postgres",
@@ -40,8 +41,13 @@ try {
     if (checkExistingUser.rows.length > 0 ) {
       res.send("email already exist please try different email")
     } else{
-      await db.query("insert into users (email, password) values($1,$2)", [uEmail, uPassword]);
-      res.render("secrets.ejs");
+      bycrpt.hash(uPassword,10, async(err, hash)=>{
+        if (err) {
+          res.send(" register_ something went wrong!", err)
+        }
+        await db.query("insert into users (email, password) values($1,$2)", [uEmail, hash]);
+        res.render("secrets.ejs");
+      })
     }
 } catch (error) {
   console.log(error);
@@ -57,12 +63,21 @@ app.post("/login", async (req, res) => {
     if (checkExistingUser.rows.length > 0 ) {
       const result = await db.query("select password from users where email = $1", [uEmail])
       const dbPassword = result.rows[0].password;
+
+      bycrpt.compare(uPassword, dbPassword, (err, result)=>{
+        if (err) {
+          console.log("login_ something went wrong");
+        } else {
+          console.log(result);
+          
+          if (result) {
+            res.render("secrets.ejs")
+          } else {
+            res.send("inCorrect password")
+          }
+        }
+      })
       
-      if (dbPassword == uPassword) {
-        res.render("secrets.ejs")
-      } else{
-        res.send("inCorrect password")
-      }
     } else{
       res.send("user does not exist, please register first")
     }
