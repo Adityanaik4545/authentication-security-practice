@@ -2,6 +2,9 @@ import express from "express";
 import bodyParser from "body-parser";
 import pg from "pg";
 import bycrpt from "bcrypt";
+import session from "express-session";
+import passport from "passport";
+import { Strategy } from "passport-local";
 
 const db = new pg.Client({
   user: "postgres",
@@ -15,6 +18,18 @@ db.connect();
 
 const app = express();
 const port = 3000;
+
+app.use(session({
+  secret: "Topsecret",
+  saveUninitialized: false,
+  resave: false,
+  cookie: {
+    maxAge: 1000 * 60 * 60 * 24
+  }
+}))
+
+app.use(passport.initialize())
+app.use(passport.session())
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -30,6 +45,22 @@ app.get("/login", (req, res) => {
 app.get("/register", (req, res) => {
   res.render("register.ejs");
 });
+
+app.get("/secrets", (req, res) => {
+  
+  if (req.isAuthenticated()) {
+  res.render("secrets.ejs");
+    
+  } else {
+    res.redirect("/login");
+  }
+});
+
+app.post("/login", passport.authenticate("local",{
+  successRedirect: "/secrets",
+  failureRedirect: "/login"
+}) 
+)
 
 app.post("/register", async (req, res) => {
   const uEmail = req.body.username;
@@ -54,38 +85,47 @@ try {
 }
 });
 
-app.post("/login", async (req, res) => {
-    const uEmail = req.body.username;
-  const uPassword = req.body.password;
-  try {
-        const checkExistingUser = await db.query("select * from users where email = $1", [uEmail]);
+passport.use(new Strategy(async function verify(username, password, cb) {
+    try {
+        const checkExistingUser = await db.query("select * from users where email = $1", [username]);
     
     if (checkExistingUser.rows.length > 0 ) {
-      const result = await db.query("select password from users where email = $1", [uEmail])
-      const dbPassword = result.rows[0].password;
+      const user = checkExistingUser.rows[0]
+      const dbPassword = user.password;
 
-      bycrpt.compare(uPassword, dbPassword, (err, result)=>{
+      bycrpt.compare(password, dbPassword, (err, valid)=>{
         if (err) {
-          console.log("login_ something went wrong");
+          console.log("error comparing password!", err);
+          return cb(err)
         } else {
-          console.log(result);
-          
-          if (result) {
-            res.render("secrets.ejs")
+          if (valid) {
+            return cb(null, user);
           } else {
-            res.send("inCorrect password")
+            return cb(null, false)
           }
         }
       })
       
     } else{
-      res.send("user does not exist, please register first")
+      return cb("user does not exist")
     }
   } catch (error) {
     console.log(error);
     
   }
-});
+}))
+
+passport.serializeUser((user, cb)=>{
+  cb(null, user.id);
+})
+
+passport.deserializeUser(async(id, cb)=>{
+   const result = await db.query("select * from users where id = $1", [id]);
+    const user = result.rows[0]
+    console.log("deserial ->",user);
+    
+  cb(null, user);
+})
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
